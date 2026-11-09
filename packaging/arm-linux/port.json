@@ -1,0 +1,30 @@
+{
+  "schema": "nixport.port.v1",
+  "id": "spartanport",
+  "name": "Foxy Launcher",
+  "version": "3.0.0",
+  "appimage": "SpartanPort-arm64.AppImage",
+  "description": "Foxy Launcher para Android ARM64: configure resolução 3D, FPS, upscaling experimental, texturas, efeitos e controles. Perfil inicial conservador para Snapdragon 8 Gen 3 / Adreno 750. Requer nixport e um dump próprio do jogo.",
+  "upstream": "https://github.com/FelipePrado0/SpartanPort",
+  "entries": [
+    {
+      "id": "launcher",
+      "name": "Foxy Launcher",
+      "kind": "launcher",
+      "command": "AppRun launcher",
+      "desc": "Configure o jogo, gráficos 3D, FPS, controles, patches e desempenho."
+    }
+  ],
+  "storage": {
+    "home": "home"
+  },
+  "virtualKeys": "virtualkeys.json",
+  "logs": [
+    "home/gport/logs/launch.log",
+    "home/gport/user/last_run.log"
+  ],
+  "maintainer": "Daniel",
+  "edition": "S24 Ultra",
+  "upstreamAuthor": "Felipe Prado",
+  "upstreamRepository": "https://github.com/FelipePrado0/SpartanPort"
+}

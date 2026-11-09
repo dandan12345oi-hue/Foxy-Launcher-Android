@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Foxy Launcher
+Comment=Foxy Launcher — God of War III Remastered ARM64
+Exec=AppRun launcher
+Icon=spartanport
+Categories=Game;

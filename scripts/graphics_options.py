@@ -1,0 +1,359 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-or-later
+"""Startup graphics options of spartanport.ini (gpu/shim/spartanport_graphics.h) for run.py.
+
+The in-game menu and the launcher write them; run.py turns them into game patches and
+environment variables at every start, so "Apply and restart" uses the new values. After a
+restart the game confirms them (restart_unconfirmed=0) once it shows frames; when a launch
+never did, the next start goes back to the last confirmed values.
+"""
+import json
+import math
+from pathlib import Path
+
+import build_flags  # noqa: E402  (scripts/)
+
+RESOLUTIONS = ('native', '480p', '720p', '900p', '1440p', '1800p', '4K',
+               '2560x1080', '3440x1440', '3840x1600', '5120x1440', '1920x1200', '2560x1600', '1280x800',
+               '1440x900', '1360x768',
+               '1280x960', '1440x1080', '1920x1440', '2048x1536', '2560x1920',
+               '5120x2160', '8K')
+# The ultrawide, 16:10 and 4:3 sizes of the Ultrawide mod (#202), built in: beta until more screens confirm
+# them, except the ones tested in game (the maintainer's own tests and players' reports in issues #180, #505
+# and #519): 2560x1080, 1440x1080, 2048x1536, 2560x1920 and 8K are still beta.
+TESTED_RESOLUTIONS = ('3440x1440', '3840x1600', '5120x1440', '5120x2160', '1920x1200', '2560x1600', '1280x800',
+                      '1440x900', '1360x768', '1280x960', '1920x1440')
+# gport: 安卓增量——设备线额外的两个分辨率：安卓侧的补丁数据集带来的（patches/*.xml 的
+# "Resolution Patch - 540p" / "- 1080p"，上游既没有这两个名字也没有对应补丁）。上游 tag 版的
+# 列表少了它们 → 列表与数据集脱节，补丁在但选不到。桌面构建不带它们，行为与上游逐字一致。
+# 客机侧同名表在 gpu/shim/spartanport_graphics.h（Resolutions / ResolutionSizes），两边要同步。
+DEVICE_RESOLUTIONS = ('540p', '1080p')
+DEVICE_SIZES = {'540p': (960, 540), '1080p': (1920, 1080)}
+if build_flags.ARM:
+    RESOLUTIONS = RESOLUTIONS + DEVICE_RESOLUTIONS
+BETA_RESOLUTIONS = tuple(r for r in RESOLUTIONS[7:] if r not in TESTED_RESOLUTIONS)
+SIZES = {'native': (1920, 1080), '480p': (854, 480), '720p': (1280, 720), '900p': (1600, 900),
+         '1440p': (2560, 1440), '1800p': (3200, 1800), '4K': (3840, 2160), '8K': (7680, 4320)}
+if build_flags.ARM:
+    SIZES.update(DEVICE_SIZES)
+ASPECTS = (('16:9', 16 / 9), ('16:10', 16 / 10), ('21:9', 2.37), ('32:9', 32 / 9), ('4:3', 4 / 3))
+ENGINE_FPS = (60, 100, 120, 144, 180, 240)
+# The Steam Deck's DMI names: LCD (Jupiter) and OLED (Galileo), both with a 1280 × 800 screen (#855).
+STEAM_DECK_PRODUCTS = ('Jupiter', 'Galileo')
+STEAM_DECK_RESOLUTION = '1280x800'
+
+
+def steam_deck(dmi=Path('/sys/devices/virtual/dmi/id')):
+    """True on a Steam Deck running Linux (SteamOS or another distribution), from its DMI names."""
+    try:
+        vendor = (dmi / 'sys_vendor').read_text(encoding='utf-8').strip()
+        product = (dmi / 'product_name').read_text(encoding='utf-8').strip()
+    except (OSError, UnicodeError):
+        return False
+    return vendor == 'Valve' and product in STEAM_DECK_PRODUCTS
+
+
+# gport: 安卓增量——设备线的缺省集（ARM 构建，scripts/build_flags.py）。移动端 GPU 预算有限，
+# 桌面缺省（FSR 3 升采样、物体运动抖动、不限帧、原生分辨率、120 帧）在手机上跑不动：
+# 升采样与物体运动关掉，渲染分辨率降到 720p，帧率压到 60。
+# 键名与 spartanport.ini 一致；客机侧 gpu/shim/spartanport_settings.h 有同一组缺省值，改一处
+# 要同时改另一处。启动器把这里的值写进 spartanport.ini（INI_DEFAULTS）。
+DEVICE_DEFAULTS = {'render_resolution': '720p', 'engine_fps': '60', 'fps_limit': '60',
+                   'upscaler': 'off', 'object_motion': '0'}
+
+
+def default_render_resolution(dmi=Path('/sys/devices/virtual/dmi/id')):
+    """The render resolution before the player chooses one: the device line's 720p, the Steam Deck's
+    own screen, or native. A choice saved in spartanport.ini always wins, so this only changes a
+    first start."""
+    if build_flags.ARM:
+        return DEVICE_DEFAULTS['render_resolution']
+    return STEAM_DECK_RESOLUTION if steam_deck(dmi) else 'native'
+
+
+def default_ini_values():
+    """The startup options of spartanport.ini before the player changes them."""
+    values = {'render_resolution': default_render_resolution(), 'engine_fps': '120',
+              'deferred_readback': '1', 'stale_readback': '1', 'async_shaders': '1',
+              'monitor': '', 'hdr': '0', 'glyph_style': 'off', 'anisotropy': '0',
+              # gport: 上游 3.0.0 新增的 RCAS 锐化默认是开；它让 presenter 每帧多跑一趟
+              # FSR/RCAS pass。设备线默认关（Turnip/Adreno 830 上疑似与呈现路径的 barrier
+              # 崩溃有关，见 docs/port/release-policy.md 同目录的诊断记录）；游戏内菜单
+              # （图形 → Sharpening）仍可临时打开。
+              'rcas': '1'}
+    # gport: the device line (ARM) starts at its own defaults, not the desktop ones.
+    if build_flags.ARM:
+        values['render_resolution'] = DEVICE_DEFAULTS['render_resolution']
+        values['engine_fps'] = DEVICE_DEFAULTS['engine_fps']
+        values['rcas'] = '0'
+        # gport: 上游 3.0.0 的延迟回读（deferred image readback）在 Adreno 830 的 Turnip 上
+        # 触发 Vulkan 设备丢失：2026-11-01 平板上两次事故（黑屏帧冻结 / 退出码 23 的
+        # ErrorDeviceLost）都在它开着时复现，关掉后长时间游玩未再复现。设备线默认关；
+        # 桌面构建保持上游的值。见 docs/nixport/01-debug-playbook.md。
+        values['deferred_readback'] = '0'
+    return values
+
+
+DEFAULTS = default_ini_values()
+RESOLUTION_PREFIX = 'Resolution Patch'
+FPS_PREFIX = 'Frame Rate Patch'
+TEXTURE_FIX = 'Bug Fix - Texture Corruption Fix'
+
+
+def read_ini(path):
+    values = {}
+    try:
+        lines = Path(path).read_text(encoding='utf-8').splitlines()
+    except OSError:
+        return values
+    for line in lines:
+        if '=' in line and not line.lstrip().startswith('#'):
+            key, value = line.split('=', 1)
+            values[key.strip()] = value.strip()
+    return values
+
+
+def write_keys(path, updates):
+    """Rewrites `updates` in place and appends missing keys, keeping every other line."""
+    path = Path(path)
+    try:
+        lines = path.read_text(encoding='utf-8').splitlines()
+    except OSError:
+        lines = ['# spartanport settings (in-game menu: Insert / R3+L2)']
+    done, out = set(), []
+    for line in lines:
+        key = line.split('=', 1)[0].strip() if '=' in line and not line.lstrip().startswith('#') else None
+        if key in updates:
+            out.append(f'{key}={updates[key]}')
+            done.add(key)
+        else:
+            out.append(line)
+    out += [f'{k}={v}' for k, v in updates.items() if k not in done]
+    path.write_text('\n'.join(out) + '\n', encoding='utf-8')
+
+
+def resolutions(extra=()):
+    """The render resolutions: the built-in ones and those the enabled mods' patch files add."""
+    return RESOLUTIONS + tuple(e for e in extra if e not in RESOLUTIONS)
+
+
+def aspect_name(width, height):
+    """The marketing name of the aspect ratio ("21:9" covers 2560x1080 to 3840x1600), else the reduced ratio."""
+    ratio = width / height
+    for name, value in ASPECTS:
+        if abs(ratio - value) < 0.05:
+            return name
+    divisor = math.gcd(width, height)
+    return f'{width // divisor}:{height // divisor}'
+
+
+
+# Temporal upscaler presets (spartanport.ini preset=, gpu/shim/spartanport_settings.h Preset): render
+# scale per axis. Native AA keeps the game's size; Ultra Quality (1.3x, FSR 1's name) is appended.
+PRESET_SCALES = (1.0, 1.5, 1.7, 2.0, 3.0, 1.3)
+
+
+def upscale_render_size(preset, output):
+    """The game's render size for an upscaler preset and output size: even, from 640x360 to 7680x4320.
+    Never the game's own 1920x1080 nor the output size (Native AA): at that size the game composites
+    straight into the display buffer, before the upscaler can run, so it is 2 pixels short instead.
+    None for an unknown preset."""
+    try:
+        scale = PRESET_SCALES[int(preset)]
+    except (ValueError, TypeError, IndexError):
+        return None
+    even = lambda value: 2 * round(value / 2)
+    size = (min(max(even(output[0] / scale), 640), 7680), min(max(even(output[1] / scale), 360), 4320))
+    if size in (tuple(output), SIZES['native']):
+        size = (size[0] - 2, size[1] - 2)
+    return size
+
+
+# The built-in resolution patches a render size is made from, smallest first, with the largest size
+# each covers: the Video Arena (0x7cd918) and the passes the game sizes at 1080p grow with them.
+PATCH_TEMPLATES = (('720p', (1280, 720), (1920, 1080)), ('1440p', (2560, 1440), (2560, 1440)),
+                   ('4K', (3840, 2160), (3840, 2160)), ('8K', (7680, 4320), (7680, 4320)))
+
+
+# gport: our patch set is split per title id (patches/God_of_War_III_Remastered_<title id>.xml);
+# upstream's single patches/CUSA01623.xml is gone. The caller passes the game's own file.
+def resolution_patch_xml(width, height, source=Path(__file__).resolve().parents[1] / 'patches' / 'CUSA01623.xml'):
+    """A "Resolution Patch - <width>x<height>" patch file: the smallest built-in resolution patch that
+    fits the size, with its sizes and half sizes (bloom) replaced."""
+    import re
+    name, (tw, th), _ = next((t for t in PATCH_TEMPLATES if width <= t[2][0] and height <= t[2][1]),
+                             PATCH_TEMPLATES[-1])
+    text = Path(source).read_text(encoding='utf-8')
+    block = re.search(rf'<Metadata [^>]*Name="Resolution Patch - {name}".*?</Metadata>', text, re.S).group(0)
+    le = lambda value, size: value.to_bytes(size, 'little').hex()
+    values = {le(tw, 4): le(width, 4), le(th, 4): le(height, 4), le(tw, 2): le(width, 2),
+              le(th, 2): le(height, 2), le(tw // 2, 4): le(width // 2, 4), le(th // 2, 4): le(height // 2, 4)}
+    block = re.sub(r'Value="([0-9a-f]+)"', lambda m: f'Value="{values.get(m.group(1), m.group(1))}"', block)
+    block = re.sub(r'Name="Resolution Patch - [^"]*"', f'Name="Resolution Patch - {width}x{height}"', block, count=1)
+    return '<?xml version="1.0" encoding="utf-8"?>\n<Patch>\n    ' + block + '\n</Patch>\n'
+
+
+def upscaler_render_size(ini, environment):
+    """(width, height, output) when a temporal upscaler preset renders below the output size, else None.
+    The output is the chosen render resolution: the upscaler delivers it and the preset renders below
+    it. The launcher's upscaler switch must be on; SPARTAN_UPSCALER and SPARTAN_UPSCALE_PRESET override
+    spartanport.ini as in the game."""
+    if environment.get('SPARTAN_EXPERIMENTAL_UPSCALER') != '1':
+        return None
+    upscaler = environment.get('SPARTAN_UPSCALER') or ini.get('upscaler', 'none')
+    if upscaler not in ('fsr3', 'fsr4', 'fsr411'):
+        return None
+    output = resolution_size(ini.get('render_resolution', 'native')) or SIZES['native']
+    size = upscale_render_size(environment.get('SPARTAN_UPSCALE_PRESET') or ini.get('preset', '0'), output)
+    return (*size, output) if size else None
+
+
+def resolution_size(name):
+    """(width, height) of a built-in name or a mod's "<width>x<height>"; None for anything else."""
+    try:
+        width, height = SIZES.get(name) or map(int, name.split('x'))
+    except ValueError:
+        return None
+    return width, height
+
+
+def aspect_of(name):
+    """The aspect ratio a render resolution belongs to ('16:9', '21:9', a mod's '5:4'), None if unknown."""
+    size = resolution_size(name)
+    return aspect_name(*size) if size else None
+
+
+def aspects(names):
+    """The aspect ratios of these resolutions: the named ones in ASPECTS order, then the others."""
+    present = {aspect_of(n) for n in names} - {None}
+    order = [a for a, _r in ASPECTS]
+    return [a for a in order if a in present] + sorted(present - set(order))
+
+
+def resolutions_for(aspect, names):
+    """The resolutions of one aspect ratio, smallest first, with native on top of its list."""
+    chosen = [n for n in names if aspect_of(n) == aspect]
+    pixels = lambda n: (n != 'native', resolution_size(n)[0] * resolution_size(n)[1])
+    return sorted(chosen, key=pixels)
+
+
+def closest_resolution(aspect, current, names):
+    """The resolution of `aspect` nearest to `current` in pixels (`current` itself when it is of it)."""
+    chosen = resolutions_for(aspect, names)
+    if current in chosen or not chosen:
+        return current if current in chosen else None
+    size = resolution_size(current) or SIZES['native']
+    return min(chosen, key=lambda n: abs(resolution_size(n)[0] * resolution_size(n)[1] - size[0] * size[1]))
+
+
+def resolution_label(name, aspect=True):
+    """What the lists show for a render resolution: '1440p · 2560 × 1440 · 16:9', '3440 × 1440 · 21:9 (beta)'.
+    `name` is a built-in name or a mod's "<width>x<height>"; anything else is shown as it is. Without
+    `aspect` the ratio is left out (the launcher's list beside the Aspect ratio filter)."""
+    try:
+        width, height = SIZES.get(name) or map(int, name.split('x'))
+    except ValueError:
+        return name
+    title = 'Native' if name == 'native' else name if name in SIZES else None
+    label = ' · '.join(p for p in (title, f'{width} × {height}', aspect and aspect_name(width, height)) if p)
+    return label + (' (beta)' if name in BETA_RESOLUTIONS else '')
+
+
+def startup_options(ini, extra=()):
+    """The startup options, normalized; unknown values fall back to the defaults. `extra`: the
+    resolutions of the enabled mods (a mod that is off leaves its resolution out: native)."""
+    options = {key: ini.get(key, value) for key, value in DEFAULTS.items()}
+    if options['render_resolution'] not in resolutions(extra):
+        options['render_resolution'] = 'native'
+    if options['engine_fps'] not in {str(f) for f in ENGINE_FPS}:
+        options['engine_fps'] = '120'
+    for key in ('deferred_readback', 'stale_readback', 'async_shaders', 'rcas'):
+        options[key] = '0' if options[key] == '0' else '1'
+    monitor = options['monitor']
+    options['monitor'] = monitor if monitor.isascii() and monitor.isdigit() and len(monitor) <= 10 and int(monitor) <= 2147483647 else ''
+    options['hdr'] = '1' if options['hdr'] == '1' else '0'
+    if options['glyph_style'] not in ('off', 'auto', 'xbox', 'nintendo', 'keyboard'):
+        options['glyph_style'] = 'off'
+    if options['anisotropy'] not in ('0', '2', '4', '8', '16'):
+        options['anisotropy'] = '0'
+    return options
+
+
+def prepare(config, state_path, extra=(), environment=None):
+    """(options, reverted): the startup options of this launch, restoring the last confirmed
+    ones when the previous launch after a restart never confirmed its own."""
+    ini = read_ini(config)
+    if environment is not None:
+        migrated = {key: environment.get(env, DEFAULTS[key]) for key, env in
+                    (('monitor', 'SPARTAN_MONITOR'), ('hdr', 'SPARTAN_HDR'),
+                     ('glyph_style', 'SPARTAN_GLYPH_STYLE'), ('anisotropy', 'SPARTAN_ANISOTROPY')) if key not in ini}
+        if migrated:
+            ini.update(migrated)
+            normalized = startup_options(ini, extra)
+            write_keys(config, {key: normalized[key] for key in migrated})
+    state = {}
+    try:
+        state = json.loads(Path(state_path).read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        pass
+    options = startup_options(ini, extra)
+    reverted = False
+    if ini.get('restart_unconfirmed') == '1':
+        if state.get('attempt') and state.get('last_good'):
+            options = startup_options(state['last_good'], extra)
+            write_keys(config, {**options, 'restart_unconfirmed': '0'})
+            state['attempt'] = False
+            reverted = True
+        else:
+            state['attempt'] = True
+    else:
+        state = {'last_good': options, 'attempt': False}
+    Path(state_path).write_text(json.dumps(state, indent=2), encoding='utf-8')
+    return options, reverted
+
+
+def patch_names(names, options, texture_fix_available=True):
+    """The launcher's patch list with the resolution and frame rate patches of `options`."""
+    names = [n for n in names if not n.startswith(RESOLUTION_PREFIX) and not n.startswith(FPS_PREFIX)]
+    resolution = options['render_resolution']
+    if resolution != 'native':
+        names = [n for n in names if n != TEXTURE_FIX] + [f'{RESOLUTION_PREFIX} - {resolution}']
+    elif texture_fix_available and TEXTURE_FIX not in names:
+        names.insert(0, TEXTURE_FIX)
+    # The engine rate is chosen live (spartanport_settings.cpp SyncEngineFps): the highest patch gives
+    # the swing energy fix and a vblank every lower rate fits in.
+    names.append(f'{FPS_PREFIX} - {max(ENGINE_FPS)} FPS')
+    return names
+
+
+def restrict_to_available(names, available):
+    """names without the patches this XML lacks. A missing frame rate patch is replaced by the
+    highest one it has below the requested rate (the 240 FPS patch of the first XML has no
+    counterpart in the second)."""
+    kept = [n for n in names if n in available]
+    for name in names:
+        if name in available:
+            continue
+        print(f'Patches: {name} is not available for this game build: skipped', flush=True)
+        if name.startswith(f'{FPS_PREFIX} - '):
+            wanted = int(name.split(' - ')[1].split()[0])
+            lower = [int(n.split(' - ')[1].split()[0]) for n in available if n.startswith(f'{FPS_PREFIX} - ')
+                     and int(n.split(' - ')[1].split()[0]) <= wanted]
+            if lower:
+                kept.append(f'{FPS_PREFIX} - {max(lower)} FPS')
+                print(f'Patches: using {kept[-1]} instead', flush=True)
+    return kept
+
+
+def applied_engine_fps(names):
+    """The engine rate the applied patch list gives: 60 without a frame rate patch."""
+    return max((int(n.split(' - ')[1].split()[0]) for n in names if n.startswith(f'{FPS_PREFIX} - ')), default=60)
+
+
+def environment(options):
+    return {'SPARTAN_DEFERRED_READBACK': options['deferred_readback'],
+            'SPARTAN_STALE_READBACK': options['stale_readback'],
+            'SPARTAN_ASYNC_SHADERS': options['async_shaders'],
+            'SPARTAN_MONITOR': options.get('monitor', ''), 'SPARTAN_HDR': options.get('hdr', '0'),
+            'SPARTAN_GLYPH_STYLE': options.get('glyph_style', 'off'),
+            'SPARTAN_ANISOTROPY': options.get('anisotropy', '0')}

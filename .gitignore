@@ -1,0 +1,56 @@
+out/
+__pycache__/
+user/
+*.mp4
+/*.ini
+fsr4_shaders/
+pgo/
+*.png
+# Documentation pictures are part of the repository.
+!docs/images/*.png
+last_run.log
+dist/
+fsr4_411/
+vkd3d-proton.cache
+tools/fsr4cap/*.exe
+perf.data
+# Local leftovers: patch backups, generated SPIR-V, analysis outputs, test saves and routes
+*.orig
+/*.spv
+/1060/
+/docs/savedata_route/
+/docs/route*.txt
+/docs/route_run.log
+mods.json
+patches.json
+gamecontrollerdb.txt
+!launcher/spartanport.png
+!scripts/controller_diagrams/xbox.png
+!scripts/controller_diagrams/nintendo.png
+!launcher/logo.png
+!packaging/icon/monogram.png
+/.vscode
+
+.local-deps
+# The launcher's data files when it runs from a checkout (data folder = this folder).
+/settings.json
+/mods.json
+/mods_presets.json
+/patches.json
+/game_icon.ico
+/legacy-migrated
+/shortcut-migrated
+/mods/
+# Rust launcher (docs/specs/2026-10-21-rust-launcher-design.md)
+launcher-rust/target/
+!launcher-rust/assets/*.png
+!docs/specs/assets/**/*.png
+# Release stamp: the workflows' Stamp step writes it here; a stale local copy would be packaged.
+/release.json
+# Brainstorming companion sessions
+.superpowers/
+# Local agent plans and specs (superpowers skills), not shared for now
+/docs/superpowers/
+launcher-rust/.cargo/config.toml
+# gport: 交叉编译配置含本机绝对路径，各机器自己生成，不入库
+launcher-rust/.cargo/
